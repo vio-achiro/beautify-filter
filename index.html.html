@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before / After Comparator</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #1a1a1a;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 40px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 48px;
+  }
+
+  .slider-wrap {
+    position: relative;
+    width: 90vw;
+    max-width: 1800px;   /* dimensiunea pe ecran; raportul rămâne 1920x1080 = 16:9 */
+    aspect-ratio: 1920 / 1080;
+    overflow: hidden;
+    border-radius: 8px;
+    user-select: none;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+    background: #000;
+  }
+
+  .layer-after {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .layer-after video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .layer-before {
+    position: absolute;
+    inset: 0;
+    width: 50%;
+    height: 100%;
+    overflow: hidden;
+  }
+  .layer-before-inner {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+  }
+  .layer-before-inner video {
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    max-width: none;
+  }
+
+  .handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 3px;
+    background: #ffffff;
+    cursor: ew-resize;
+    transform: translateX(-50%);
+    z-index: 10;
+  }
+  .handle-knob {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: #ffffff;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+  }
+  .handle-knob svg { width: 20px; height: 20px; }
+
+  .label {
+    position: absolute;
+    top: 16px;
+    padding: 4px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    background: rgba(0,0,0,0.5);
+    border-radius: 4px;
+    letter-spacing: 0.02em;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .label-before { left: 16px; }
+  .label-after { right: 16px; }
+
+  .hint {
+    color: #999;
+    font-size: 13px;
+    text-align: center;
+    margin-top: 12px;
+  }
+
+  .title {
+    color: #eee;
+    font-size: 15px;
+    font-weight: 600;
+    text-align: center;
+    margin-bottom: 12px;
+  }
+
+  .block { width: 90vw; max-width: 1800px; }
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<script>
+  /* ============================================================
+     CONFIGUREAZĂ AICI perechile tale de video "înainte" / "după".
+     Adaugă câte obiecte vrei în array — fiecare produce un slider.
+     Pune fișierele video în același folder cu acest HTML.
+     ============================================================ */
+  const PAIRS = [
+   { title: "Bee", before: "inainte1.mp4", after: "dupa1.mp4" },
+    { title: "Tomato", before: "inainte2.mp4", after: "dupa2.mp4" },
+    { title: "Sheep", before: "inainte3.mp4", after: "dupa3.mp4" },
+    // { title: "Exemplu 4", before: "inainte4.mp4", after: "dupa4.mp4" },
+  ];
+
+  const app = document.getElementById('app');
+
+  PAIRS.forEach((pair, i) => {
+    const block = document.createElement('div');
+    block.className = 'block';
+    block.innerHTML = `
+      ${pair.title ? `<div class="title">${pair.title}</div>` : ''}
+      <div class="slider-wrap" id="wrap-${i}">
+        <div class="layer-after">
+          <video src="${pair.after}" autoplay muted loop playsinline></video>
+        </div>
+        <div class="layer-before" id="before-${i}">
+          <div class="layer-before-inner" id="inner-${i}">
+            <video src="${pair.before}" autoplay muted loop playsinline></video>
+          </div>
+        </div>
+        <div class="label label-before">BEFORE</div>
+        <div class="label label-after">AFTER</div>
+        <div class="handle" id="handle-${i}">
+          <div class="handle-knob">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="15 18 9 12 15 6"></polyline>
+              <polyline points="9 18 15 12 9 6" transform="translate(6,0)"></polyline>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <p class="hint">Drag the white bar left and right to compare</p>
+    `;
+    app.appendChild(block);
+
+    const wrap = block.querySelector(`#wrap-${i}`);
+    const layerBefore = block.querySelector(`#before-${i}`);
+    const inner = block.querySelector(`#inner-${i}`);
+    const handle = block.querySelector(`#handle-${i}`);
+    let dragging = false;
+
+    // --- Sincronizare video: corectează derivă acumulată în timp ---
+    const videoAfter = wrap.querySelector('.layer-after video');
+    const videoBefore = inner.querySelector('video');
+
+    function syncVideos() {
+      if (!videoAfter || !videoBefore) return;
+      if (videoAfter.readyState < 2 || videoBefore.readyState < 2) return;
+      const diff = Math.abs(videoAfter.currentTime - videoBefore.currentTime);
+      // dacă decalajul depășește 0.15 secunde, realiniază video-ul "înainte" după "după"
+      if (diff > 0.15) {
+        videoBefore.currentTime = videoAfter.currentTime;
+      }
+    }
+    setInterval(syncVideos, 1000);
+
+    function resizeInner() {
+      const w = wrap.getBoundingClientRect().width;
+      inner.style.width = w + 'px';
+      const vid = inner.querySelector('video');
+      if (vid) vid.style.width = w + 'px';
+    }
+
+    function setPosition(clientX) {
+      const rect = wrap.getBoundingClientRect();
+      let pct = ((clientX - rect.left) / rect.width) * 100;
+      pct = Math.max(0, Math.min(100, pct));
+      layerBefore.style.width = pct + '%';
+      handle.style.left = pct + '%';
+    }
+
+    handle.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      handle.setPointerCapture(e.pointerId);
+    });
+    window.addEventListener('pointerup', () => dragging = false);
+    window.addEventListener('pointermove', (e) => { if (dragging) setPosition(e.clientX); });
+    wrap.addEventListener('click', (e) => setPosition(e.clientX));
+    window.addEventListener('resize', resizeInner);
+    resizeInner();
+  });
+</script>
+
+</body>
+</html>
